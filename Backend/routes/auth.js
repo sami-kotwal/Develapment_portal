@@ -9,6 +9,19 @@ const {
 
 const router = express.Router();
 
+const allowedUsers = new Set([
+  "mahad",
+  "mahad@northstar.dev",
+  "samiullah",
+  "samiullah@northstar.dev",
+  "usman",
+  "usman@northstar.dev",
+]);
+
+function isAllowedPortalUser(user) {
+  return allowedUsers.has(user?.username) || allowedUsers.has(user?.email);
+}
+
 router.get("/me", async (req, res) => {
   try {
     const authorization = req.headers.authorization || "";
@@ -30,6 +43,11 @@ router.get("/me", async (req, res) => {
     }
 
     const user = session.user;
+    if (!isAllowedPortalUser(user)) {
+      await Session.findByIdAndDelete(session._id);
+      return res.status(403).json({ message: "This account is not allowed to access the portal." });
+    }
+
     return res.json({
       user: {
         id: user.id,
@@ -60,6 +78,10 @@ router.post("/login", async (req, res) => {
 
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       return res.status(401).json({ message: "Invalid username/email or password." });
+    }
+
+    if (!isAllowedPortalUser(user)) {
+      return res.status(403).json({ message: "Only approved AY TECH users can sign in." });
     }
 
     const token = createSessionToken();

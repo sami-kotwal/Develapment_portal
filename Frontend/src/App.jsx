@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+const API_URL = import.meta.env.VITE_API_URL || (
+  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:5000'
+    : window.location.origin
+)
 
 function formatDate(dateValue) {
   if (!dateValue) return 'Not set'
@@ -312,6 +316,38 @@ function StatusPill({ status }) {
   return <span className={`status-pill ${status.toLowerCase()}`}><i />{status}</span>
 }
 
+function isMobileViewport() {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 800px)').matches
+}
+
+function shouldIgnoreRowTap(event) {
+  return Boolean(event.target.closest('a, button, input, label, select, textarea'))
+}
+
+function DetailItem({ label, children }) {
+  return <div className="detail-item"><span>{label}</span><strong>{children}</strong></div>
+}
+
+function MobileDetailPopup({ title, subtitle, icon = 'globe', onClose, children, actions }) {
+  return (
+    <div className="mobile-detail-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="mobile-detail-popup" role="dialog" aria-modal="true" aria-labelledby="mobile-detail-title">
+        <div className="mobile-detail-heading">
+          <span className="summary-icon blue"><Icon name={icon} size={18} /></span>
+          <div>
+            <span className="eyebrow">DETAILS</span>
+            <h2 id="mobile-detail-title">{title}</h2>
+            {subtitle && <p>{subtitle}</p>}
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
+        </div>
+        <div className="mobile-detail-grid">{children}</div>
+        {actions && <div className="mobile-detail-actions">{actions}</div>}
+      </section>
+    </div>
+  )
+}
+
 function Dashboard({ setActivePage, onOpenNotifications, domains, websites, subdomains, notifications }) {
   const expiredCount = domains.filter((domain) => getDomainStatus(domain) === 'Expired').length
   const expiringCount = domains.filter((domain) => getDomainStatus(domain) === 'Expiring').length
@@ -415,6 +451,7 @@ function DomainFormModal({ domain, onClose, onSave, defaultDeveloper = 'Mahad' }
 
 function DomainTable({ items, websites, emptyMessage = 'No domains found.', header, onEdit, onTag, onDelete, canManage = false, searchQuery = '', onSearchChange = () => {} }) {
   const [openMenu, setOpenMenu] = useState(null)
+  const [selectedDomain, setSelectedDomain] = useState(null)
   const filtered = useMemo(() => items.filter((domain) => {
     const term = searchQuery.toLowerCase()
     return [
@@ -436,7 +473,10 @@ function DomainTable({ items, websites, emptyMessage = 'No domains found.', head
       <div className="domains-table">
         <div className="table-row table-head domain-table-row"><span>#</span><span>Domain</span><span>Status</span><span>Hosting</span><span>Expiration</span><span>Email</span><span>{canManage ? 'Actions' : ''}</span></div>
         {filtered.map((domain, index) => (
-          <div className="table-row domain-table-row" key={domain.id}>
+          <div className="table-row domain-table-row" key={domain.id} onClick={(event) => {
+            if (!isMobileViewport() || shouldIgnoreRowTap(event)) return
+            setSelectedDomain(domain)
+          }}>
             <span className="row-number">{index + 1}</span>
             <div className="domain-name-cell"><span className="domain-symbol"><Icon name="globe" size={18} /></span><div><strong>{domain.name}</strong><small>{websites.find((website) => website.domain === domain.name)?.status || 'Not tagged'}</small></div></div>
             <StatusPill status={getDomainStatus(domain)} />
@@ -465,6 +505,29 @@ function DomainTable({ items, websites, emptyMessage = 'No domains found.', head
         ))}
       </div>
       {filtered.length === 0 && <div className="empty-state">{searchQuery ? `No domains match "${searchQuery}".` : emptyMessage}</div>}
+      {selectedDomain && (
+        <MobileDetailPopup
+          title={selectedDomain.name}
+          subtitle={websites.find((website) => website.domain === selectedDomain.name)?.status || 'Not tagged'}
+          icon="globe"
+          onClose={() => setSelectedDomain(null)}
+          actions={canManage && (
+            <>
+              <button className="mini-action edit" onClick={() => { onEdit(selectedDomain); setSelectedDomain(null) }}>Edit</button>
+              <button className="mini-action delete" onClick={() => { onDelete(selectedDomain); setSelectedDomain(null) }}>Delete</button>
+              <button className="mini-action edit" onClick={() => { onTag(selectedDomain, 'Live'); setSelectedDomain(null) }}>Mark live</button>
+              <button className="mini-action delete" onClick={() => { onTag(selectedDomain, 'Down'); setSelectedDomain(null) }}>Mark down</button>
+            </>
+          )}
+        >
+          <DetailItem label="Status"><StatusPill status={getDomainStatus(selectedDomain)} /></DetailItem>
+          <DetailItem label="Hosting">{selectedDomain.hosting}</DetailItem>
+          <DetailItem label="Expiration">{formatDate(selectedDomain.expiry)}</DetailItem>
+          <DetailItem label="Email accounts">{selectedDomain.emailCount || 0}</DetailItem>
+          <DetailItem label="Developer">{selectedDomain.developer || 'Not assigned'}</DetailItem>
+          <DetailItem label="Website status">{selectedDomain.websiteStatus || 'None'}</DetailItem>
+        </MobileDetailPopup>
+      )}
     </section>
   )
 }
@@ -592,6 +655,7 @@ function SubdomainFormModal({ subdomain, onClose, onSave }) {
 function Subdomains({ items, onEdit, onDelete, onLogoUpload, canManage = false, searchQuery = '', onSearchChange = () => {} }) {
   const [personFilter, setPersonFilter] = useState('all')
   const [summaryFilter, setSummaryFilter] = useState('all')
+  const [selectedSubdomain, setSelectedSubdomain] = useState(null)
   const hostingerCount = items.filter((item) => item.hosting === 'Hostinger').length
   const verpexCount = items.filter((item) => item.hosting === 'Verpex').length
   const alertItems = items.filter((item) => daysSince(item.projectDate) > 30)
@@ -664,7 +728,10 @@ function Subdomains({ items, onEdit, onDelete, onLogoUpload, canManage = false, 
         <div className="domains-table">
           <div className="table-row table-head"><span>#</span><span>Subdomain</span><span>Hosting</span><span>PM</span><span>Assign to</span><span>Date</span><span>{canManage ? 'Actions' : ''}</span></div>
           {visible.map((item, index) => (
-            <div className="table-row" key={item.id}>
+            <div className="table-row" key={item.id} onClick={(event) => {
+              if (!isMobileViewport() || shouldIgnoreRowTap(event)) return
+              setSelectedSubdomain(item)
+            }}>
               <span className="row-number">{index + 1}</span>
               <div className="domain-name-cell">
                 <label className={`website-logo-upload ${canManage ? '' : 'readonly'}`} title={canManage ? 'Upload subdomain image' : 'View subdomain image'}>
@@ -690,6 +757,28 @@ function Subdomains({ items, onEdit, onDelete, onLogoUpload, canManage = false, 
           {visible.length === 0 && <div className="empty-state">{summaryFilter === 'alerts' ? 'No subdomains older than one month.' : searchQuery || personFilter !== 'all' ? 'No matching subdomain projects.' : 'No subdomains added yet.'}</div>}
         </div>
       </section>
+      {selectedSubdomain && (
+        <MobileDetailPopup
+          title={selectedSubdomain.name}
+          subtitle={`${selectedSubdomain.pm} · ${selectedSubdomain.assignedTo}`}
+          icon="activity"
+          onClose={() => setSelectedSubdomain(null)}
+          actions={(
+            <>
+              <a className="mobile-detail-link" href={homepageUrl(selectedSubdomain)} target="_blank" rel="noreferrer">Open website</a>
+              {canManage && <button className="mini-action edit" onClick={() => { onEdit(selectedSubdomain); setSelectedSubdomain(null) }}>Edit</button>}
+              {canManage && <button className="mini-action delete" onClick={() => { onDelete(selectedSubdomain); setSelectedSubdomain(null) }}>Delete</button>}
+            </>
+          )}
+        >
+          <DetailItem label="Hosting"><span className="hosting-badge">{selectedSubdomain.hosting}</span></DetailItem>
+          <DetailItem label="PM">{selectedSubdomain.pm}</DetailItem>
+          <DetailItem label="Assign to">{selectedSubdomain.assignedTo}</DetailItem>
+          <DetailItem label="Project date">{formatDate(selectedSubdomain.projectDate)}</DetailItem>
+          <DetailItem label="Age">{daysSince(selectedSubdomain.projectDate)} days</DetailItem>
+          <DetailItem label="Website URL">{homepageUrl(selectedSubdomain)}</DetailItem>
+        </MobileDetailPopup>
+      )}
     </>
   )
 }
@@ -698,6 +787,7 @@ function Websites({ domains, onUpdate, onEdit, onDelete, defaultDeveloper = 'Mah
   const [filter, setFilter] = useState('all')
   const [developerFilter, setDeveloperFilter] = useState('all')
   const [openMenu, setOpenMenu] = useState(null)
+  const [selectedWebsite, setSelectedWebsite] = useState(null)
   const websites = domains.filter((domain) => domain.websiteStatus === 'Live' || domain.websiteStatus === 'Down')
   const hostingerCount = websites.filter((domain) => domain.websiteStatus === 'Live' && domain.hosting.toLowerCase() === 'hostinger').length
   const verpexCount = websites.filter((domain) => domain.websiteStatus === 'Live' && domain.hosting.toLowerCase() === 'verpex').length
@@ -774,7 +864,10 @@ function Websites({ domains, onUpdate, onEdit, onDelete, defaultDeveloper = 'Mah
         <div className="domains-table">
           <div className="table-row table-head"><span>#</span><span>Website</span><span>Status</span><span>Hosting</span><span>Developer</span><span>Backup</span><span>Emails</span><span>{canManage ? 'Actions' : ''}</span></div>
           {visible.map((domain, index) => (
-            <div className="table-row" key={domain.id}>
+            <div className="table-row" key={domain.id} onClick={(event) => {
+              if (!isMobileViewport() || shouldIgnoreRowTap(event)) return
+              setSelectedWebsite(domain)
+            }}>
               <span className="row-number">{index + 1}</span>
               <div className="domain-name-cell">
                 <label className={`website-logo-upload ${domain.websiteStatus === 'Down' ? 'danger' : ''} ${canManage ? '' : 'readonly'}`} title={canManage ? 'Upload website image' : 'View website image'}>
@@ -822,11 +915,36 @@ function Websites({ domains, onUpdate, onEdit, onDelete, defaultDeveloper = 'Mah
           {visible.length === 0 && <div className="empty-state">{searchQuery || developerFilter !== 'all' ? 'No websites match this search or developer.' : 'No websites in this filter.'}</div>}
         </div>
       </section>
+      {selectedWebsite && (
+        <MobileDetailPopup
+          title={selectedWebsite.name}
+          subtitle={`${selectedWebsite.emailCount || 0} email accounts`}
+          icon="monitor"
+          onClose={() => setSelectedWebsite(null)}
+          actions={(
+            <>
+              <a className="mobile-detail-link" href={homepageUrl(selectedWebsite)} target="_blank" rel="noreferrer">Open website</a>
+              {canManage && <button className="mini-action edit" onClick={() => { onEdit(selectedWebsite); setSelectedWebsite(null) }}>Edit</button>}
+              {canManage && <button className="mini-action delete" onClick={() => { onDelete(selectedWebsite); setSelectedWebsite(null) }}>Delete</button>}
+              {canManage && <button className="mini-action edit" onClick={() => { onUpdate(selectedWebsite, { status: 'Live' }); setSelectedWebsite(null) }}>Mark live</button>}
+              {canManage && <button className="mini-action delete" onClick={() => { onUpdate(selectedWebsite, { status: 'Down' }); setSelectedWebsite(null) }}>Mark down</button>}
+            </>
+          )}
+        >
+          <DetailItem label="Status"><StatusPill status={selectedWebsite.websiteStatus} /></DetailItem>
+          <DetailItem label="Hosting"><span className="hosting-badge">{selectedWebsite.hosting}</span></DetailItem>
+          <DetailItem label="Developer">{selectedWebsite.developer || defaultDeveloper}</DetailItem>
+          <DetailItem label="Backup">{selectedWebsite.backupEnabled ? 'Yes' : 'No'}</DetailItem>
+          <DetailItem label="Emails">{selectedWebsite.emailCount || 0}</DetailItem>
+          <DetailItem label="Website URL">{homepageUrl(selectedWebsite)}</DetailItem>
+        </MobileDetailPopup>
+      )}
     </>
   )
 }
 
 function Portfolio({ domains, onUpdate, onEdit, onDelete, defaultDeveloper = 'Mahad', canManage = false, searchQuery = '', onSearchChange = () => {} }) {
+  const [selectedPortfolio, setSelectedPortfolio] = useState(null)
   const liveWebsites = domains.filter((domain) => domain.websiteStatus === 'Live' && (domain.developer || 'Mahad') === defaultDeveloper)
   const visible = liveWebsites.filter((domain) => {
     const term = searchQuery.toLowerCase()
@@ -864,7 +982,10 @@ function Portfolio({ domains, onUpdate, onEdit, onDelete, defaultDeveloper = 'Ma
         <div className="domains-table">
           <div className="table-row table-head"><span>#</span><span>Website</span><span>Care update</span><span>Wordfence</span><span>Recaptcha</span><span>Backup</span><span>Developer</span><span>{canManage ? 'Actions' : ''}</span></div>
           {visible.map((domain, index) => (
-            <div className="table-row" key={domain.id}>
+            <div className="table-row" key={domain.id} onClick={(event) => {
+              if (!isMobileViewport() || shouldIgnoreRowTap(event)) return
+              setSelectedPortfolio(domain)
+            }}>
               <span className="row-number">{index + 1}</span>
               <div className="domain-name-cell">
                 <span className="domain-symbol"><Icon name="monitor" size={18} /></span>
@@ -903,6 +1024,29 @@ function Portfolio({ domains, onUpdate, onEdit, onDelete, defaultDeveloper = 'Ma
           {visible.length === 0 && <div className="empty-state">{searchQuery ? 'No live websites match this search.' : 'No live websites in portfolio yet.'}</div>}
         </div>
       </section>
+      {selectedPortfolio && (
+        <MobileDetailPopup
+          title={selectedPortfolio.name}
+          subtitle={selectedPortfolio.hosting}
+          icon="portfolio"
+          onClose={() => setSelectedPortfolio(null)}
+          actions={(
+            <>
+              <a className="mobile-detail-link" href={homepageUrl(selectedPortfolio)} target="_blank" rel="noreferrer">Open website</a>
+              {canManage && <button className="mini-action edit" onClick={() => { onEdit(selectedPortfolio); setSelectedPortfolio(null) }}>Edit</button>}
+              {canManage && <button className="mini-action delete" onClick={() => { onDelete(selectedPortfolio); setSelectedPortfolio(null) }}>Delete</button>}
+            </>
+          )}
+        >
+          <DetailItem label="Hosting"><span className="hosting-badge">{selectedPortfolio.hosting}</span></DetailItem>
+          <DetailItem label="Care update">{careStatus(selectedPortfolio) === 'yes' ? 'Yes' : 'No'}</DetailItem>
+          <DetailItem label="Care update date">{selectedPortfolio.careUpdateAt ? formatDate(dateInputValue(selectedPortfolio.careUpdateAt)) : 'Default yes'}</DetailItem>
+          <DetailItem label="Wordfence">{dateInputValue(selectedPortfolio.wordfenceDate) ? formatDate(dateInputValue(selectedPortfolio.wordfenceDate)) : 'Not set'}</DetailItem>
+          <DetailItem label="Recaptcha">{selectedPortfolio.recaptchaEnabled ? 'Yes' : 'No'}</DetailItem>
+          <DetailItem label="Backup">{selectedPortfolio.backupEnabled ? 'Yes' : 'No'}</DetailItem>
+          <DetailItem label="Developer">{selectedPortfolio.developer || defaultDeveloper}</DetailItem>
+        </MobileDetailPopup>
+      )}
     </>
   )
 }
@@ -959,8 +1103,194 @@ function NotificationPopup({ items, setItems, onClose, onNavigate }) {
   )
 }
 
+function homepageUrl(item) {
+  if (item.websiteUrl) return /^https?:\/\//i.test(item.websiteUrl) ? item.websiteUrl : `https://${item.websiteUrl}`
+  return `https://${item.name}`
+}
+
+async function parseApiResponse(response, fallbackMessage) {
+  const contentType = response.headers.get('content-type') || ''
+  const data = contentType.includes('application/json')
+    ? await response.json()
+    : { message: await response.text() }
+
+  if (!response.ok) {
+    throw new Error(data.message || fallbackMessage)
+  }
+
+  return data
+}
+
+function PublicPMPage({ onLoginClick }) {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [domains, setDomains] = useState([])
+  const [subdomains, setSubdomains] = useState([])
+  const [activeView, setActiveView] = useState('live')
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+
+    function loadOverview({ silent = false } = {}) {
+      if (!silent) setLoading(true)
+      return fetch(`${API_URL}/api/public/overview`, { cache: 'no-store' })
+      .then((response) => parseApiResponse(response, 'Unable to load overview.'))
+      .catch(async (publicError) => {
+        const token = localStorage.getItem('aytech-token')
+        if (!token) throw publicError
+
+        const [domainResponse, subdomainResponse] = await Promise.all([
+          fetch(`${API_URL}/api/domains`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }),
+          fetch(`${API_URL}/api/subdomains`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }),
+        ])
+        const [domainData, subdomainData] = await Promise.all([
+          parseApiResponse(domainResponse, 'Unable to load domains.'),
+          parseApiResponse(subdomainResponse, 'Unable to load subdomains.'),
+        ])
+        return { domains: domainData.domains || [], subdomains: subdomainData.subdomains || [] }
+      })
+      .then((data) => {
+        if (!mounted) return
+        setDomains(data.domains || [])
+        setSubdomains(data.subdomains || [])
+        setError('')
+      })
+      .catch((requestError) => {
+        if (!mounted) return
+        const hasHtmlResponse = requestError.message.trim().startsWith('<')
+        setError(requestError.message === 'Failed to fetch'
+          ? 'Backend se connection nahi ho raha. Backend server start karein.'
+          : hasHtmlResponse
+            ? 'Backend par public overview route abhi deploy nahi hua. Backend redeploy karein.'
+          : `${requestError.message} Backend deploy/update check karein.`)
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+    }
+
+    function refreshOnFocus() {
+      loadOverview({ silent: true })
+    }
+
+    loadOverview()
+    const refreshTimer = window.setInterval(() => loadOverview({ silent: true }), 30000)
+    window.addEventListener('focus', refreshOnFocus)
+
+    return () => {
+      mounted = false
+      window.clearInterval(refreshTimer)
+      window.removeEventListener('focus', refreshOnFocus)
+    }
+  }, [])
+
+  const liveWebsites = domains.filter((domain) => domain.websiteStatus === 'Live')
+  const downWebsites = domains.filter((domain) => domain.websiteStatus === 'Down')
+  const expiredDomains = domains.filter((domain) => getDomainStatus(domain) === 'Expired')
+  const expiringSoonDomains = domains.filter((domain) => getDomainStatus(domain) === 'Expiring')
+  const dataSets = {
+    live: liveWebsites,
+    down: downWebsites,
+    expired: expiredDomains,
+    expiring: expiringSoonDomains,
+    subdomains,
+  }
+  const activeItems = dataSets[activeView].filter((item) => {
+    const term = search.trim().toLowerCase()
+    if (!term) return true
+    return [item.name, item.hosting, item.developer, item.pm, item.assignedTo, item.websiteStatus]
+      .some((value) => String(value || '').toLowerCase().includes(term))
+  })
+  const cards = [
+    { id: 'live', label: 'Live websites', value: liveWebsites.length, icon: 'monitor', tone: 'green' },
+    { id: 'down', label: 'Down websites', value: downWebsites.length, icon: 'activity', tone: 'red' },
+    { id: 'expired', label: 'Expired domains', value: expiredDomains.length, icon: 'archive', tone: 'orange' },
+    { id: 'subdomains', label: 'Subdomains', value: subdomains.length, icon: 'layers', tone: 'blue' },
+  ]
+  const activeTitle = [...cards, { id: 'expiring', label: 'Expiring soon' }].find((card) => card.id === activeView)?.label || 'Overview'
+
+  return (
+    <main className="public-page">
+      <header className="public-header">
+        <AytechLogo />
+        <button className="public-login-btn" onClick={onLoginClick}>Login <Icon name="arrow" size={16} /></button>
+      </header>
+
+      <section className="public-hero">
+        <div>
+          <span className="eyebrow">PM VIEW ONLY</span>
+          <h1>AY TECH Website Status Board</h1>
+          <p>Live websites, down websites, expired domains, and subdomains are shown directly from the internal database in read-only mode.</p>
+        </div>
+        <button className={`public-status-card public-status-button ${activeView === 'expiring' ? 'active' : ''}`} onClick={() => setActiveView('expiring')}>
+          <span>Expiring soon</span>
+          <strong>{expiringSoonDomains.length}</strong>
+          <small>Within the next 30 days</small>
+        </button>
+      </section>
+
+      <section className="public-card-grid" aria-label="Website status filters">
+        {cards.map((card) => (
+          <button key={card.id} className={`public-stat-card ${activeView === card.id ? 'active' : ''}`} onClick={() => setActiveView(card.id)}>
+            <span className={`summary-icon ${card.tone}`}><Icon name={card.icon} size={19} /></span>
+            <small>{card.label}</small>
+            <strong>{card.value}</strong>
+          </button>
+        ))}
+      </section>
+
+      <section className="public-list-panel">
+        <div className="public-list-heading">
+          <div>
+            <span className="eyebrow">CONNECTED LIST</span>
+            <h2>{activeTitle}</h2>
+          </div>
+          <div className="public-search"><Icon name="search" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search records..." /></div>
+        </div>
+
+        {loading && <div className="empty-state">Loading connected records...</div>}
+        {error && <div className="login-error public-error">{error}</div>}
+        {!loading && !error && (
+          <div className="public-table">
+            <div className="public-table-row public-table-head">
+              <span>#</span><span>Name</span><span>Hosting</span><span>Status</span><span>Owner</span><span>Date</span><span>Open</span>
+            </div>
+            {activeItems.map((item, index) => (
+              <div className="public-table-row" key={item.id}>
+                <span>{index + 1}</span>
+                <div className="public-name-cell">
+                  <span className={`summary-icon ${activeView === 'down' ? 'red' : activeView === 'expired' || activeView === 'expiring' ? 'orange' : 'blue'}`}>
+                    <Icon name={activeView === 'subdomains' ? 'layers' : 'globe'} size={16} />
+                  </span>
+                  <strong>{item.name}</strong>
+                </div>
+                <span className="hosting-badge">{item.hosting}</span>
+                <span>{activeView === 'subdomains' ? 'Subdomain' : <StatusPill status={activeView === 'expired' ? 'Expired' : activeView === 'expiring' ? 'Expiring' : item.websiteStatus} />}</span>
+                <span className="table-muted">{activeView === 'subdomains' ? `${item.pm} / ${item.assignedTo}` : item.developer || 'Mahad'}</span>
+                <span className="table-muted">{
+                  activeView === 'expired' || activeView === 'expiring'
+                    ? formatDate(item.expiry)
+                    : activeView === 'subdomains'
+                      ? formatDate(item.projectDate)
+                      : activeView === 'down'
+                        ? item.downSince ? formatDate(String(item.downSince).slice(0, 10)) : 'Not set'
+                        : item.liveSince ? formatDate(String(item.liveSince).slice(0, 10)) : 'Not set'
+                }</span>
+                <a className="public-open-link" href={homepageUrl(item)} target="_blank" rel="noreferrer">View</a>
+              </div>
+            ))}
+            {activeItems.length === 0 && <div className="empty-state">No records found in this section.</div>}
+          </div>
+        )}
+      </section>
+    </main>
+  )
+}
+
 function App() {
   const [session, setSession] = useState(null)
+  const [routePath, setRoutePath] = useState(() => window.location.pathname)
   const [authNotice, setAuthNotice] = useState('')
   const [authLoading, setAuthLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(false)
@@ -975,6 +1305,20 @@ function App() {
   const [editingDomain, setEditingDomain] = useState(undefined)
   const [editingSubdomain, setEditingSubdomain] = useState(undefined)
   const loggedInDeveloper = session?.user ? userFirstName(session.user) : ''
+
+  function navigate(path) {
+    window.history.pushState({}, '', path)
+    setRoutePath(path)
+  }
+
+  useEffect(() => {
+    function handlePopState() {
+      setRoutePath(window.location.pathname)
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   useEffect(() => {
     const token = localStorage.getItem('aytech-token')
@@ -1105,6 +1449,7 @@ function App() {
     localStorage.setItem('aytech-token', data.token)
     setAuthNotice('')
     setSession(data)
+    navigate('/app')
   }
 
   function expireSession(message = 'Your session expired. Please sign in again.') {
@@ -1288,6 +1633,7 @@ function App() {
     }
   }
 
+  if (routePath === '/') return <PublicPMPage onLoginClick={() => navigate('/login')} />
   if (authLoading) return <div className="auth-loader"><div className="brand-mark"><Icon name="zap" size={22} /></div><span>Checking session...</span></div>
   if (!session) return <Login onLogin={handleLogin} notice={authNotice} />
 
